@@ -73,6 +73,7 @@ Em ambas:
 - Quanto maior o deslocamento em relação ao centro, maior a aceleração de deriva (`moveRel`), em rampa controlada (`CURVE`) entre `MIN_SPEED` e `MAX_SPEED` px/frame.
 - O deslocamento é **relativo** (`moveRel`), suavizado por média exponencial (`SMOOTHING`) e sem saltos, inclusive ao inverter a direção.
 - Uma **zona morta circular** no centro (raio = `DEAD_ZONE` × meia-diagonal) segura o ponteiro parado: centralize o alvo (câmera) ou o cursor (tela) para frear.
+- Na perspectiva `CAMERA`, uma **tolerância de estabilização** (`TOLERANCE`, em px) congela a mira na última posição aceita enquanto o ponto vibrar dentro do raio — suprime o tremor da mão ao mirar; só movimentos maiores que o raio atualizam a posição.
 - Quando o ponteiro atinge a **borda da tela ele fica preso** lá (não escapa); a caixa de captura fica vermelha e o rótulo mostra `BORDA` enquanto o cursor estiver colado na borda. Para voltar, reposicione o alvo/cursor para o centro (o ponteiro para) ou para o lado oposto (a deriva inverte).
 - Fora da zona morta, uma **seta** parte do centro do frame apontando na direção da deriva, com comprimento e percentual (`Accel`) proporcionais à velocidade atual.
 - Na perspectiva `CAMERA`, se o objeto vermelho sair da visão da câmera, a deriva desacelera até parar.
@@ -103,7 +104,8 @@ CONFIG = {
         "MIN_SPEED": 8,            # Velocidade minima de deriva (px/frame) fora da zona morta
         "MAX_SPEED": 60,           # Velocidade maxima de deriva (px/frame) com o ponto na borda do frame
         "CURVE": 1.5,              # Expoente da rampa (1.0 = linear, >1 = acelera na borda)
-        "SMOOTHING": 0.15          # Suavizacao exponencial da velocidade (0 = instantaneo, 1 = muito lento)
+        "SMOOTHING": 0.15,         # Suavizacao exponencial da velocidade (0 = instantaneo, 1 = muito lento)
+        "TOLERANCE": 10.0          # Pixels: raio que ignora o tremor da mao/mira (0 = desativa)
     },
     "INPUT_ENABLED": True,
     "PAUSE_KEY": "p"          # Pausar/retomar a simulacao de teclado/mouse (P)
@@ -124,6 +126,7 @@ CONFIG = {
 - **VECTOR_MOUSE.MAX_SPEED**: Velocidade máxima de deriva quando o alvo está na borda (limita a velocidade para controle previsível)
 - **VECTOR_MOUSE.CURVE**: Expoente da rampa de velocidade (`1.0` linear; valores maiores concentram a aceleração perto da borda)
 - **VECTOR_MOUSE.SMOOTHING**: Fator de suavização exponencial da velocidade (`0` = instantâneo; valores altos = mais lento/suave)
+- **VECTOR_MOUSE.TOLERANCE**: Raio (em pixels, perspectiva `CAMERA`) ao redor da última posição aceita do ponto. Enquanto o ponto vibrar dentro desse círculo, a mira fica congelada na posição estabilizada — elimina o tremor da mão durante a mira. Movimentos maiores que o raio atualizam a posição normalmente. `0` desativa (valores altos = mais estável, porém menos responsivo). O círculo de tolerância é desenhado em laranja sobre o frame.
 
 ## Compatibilidade
 

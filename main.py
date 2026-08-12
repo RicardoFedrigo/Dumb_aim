@@ -88,7 +88,8 @@ CONFIG = {
         "MIN_SPEED": 8,        # px/frame minimos fora da zona morta
         "MAX_SPEED": 60,       # px/frame maximos quando o ponto esta na borda do frame
         "CURVE": 1.5,          # expoente da rampa (1.0 = linear, >1 = aceleracao no fim)
-        "SMOOTHING": 0.15      # suavizacao exponencial da velocidade (0..1)
+        "SMOOTHING": 0.8,     # suavizacao exponencial da velocidade (0..1)
+        "TOLERANCE": 10.0      # px: estabiliza o tremor da mira (0 = desativa)
     },
     "INPUT_ENABLED": True,
     "PAUSE_KEY": "p"       # pausa/retoma a simulacao de teclado/mouse (P)
@@ -166,6 +167,7 @@ class MotionController:
         self.aim_center = None
         self.vec_ref_point = None
         self.vec_ref_max = 0.0
+        self.vec_anchor = None
         self.vec_vel = [0.0, 0.0]
         self.vec_accum = [0.0, 0.0]
         self.vec_in_dead_zone = False
@@ -279,9 +281,28 @@ class MotionController:
             # camera: ponto vermelho relativo ao centro de mira (calibrado ou centro do frame)
             self.vec_has_target = target_center is not None
             if not self.vec_has_target:
+                self.vec_anchor = None
                 self.vec_in_dead_zone = True
                 self._decay_velocity()
                 return 0.0, 0.0, 0.0, 0.0, None
+
+            # Tolerancia: estabiliza o tremor da mao/mira. Enquanto o ponto
+            # oscilar dentro do raio (em px) ao redor da ultima posicao aceita,
+            # a mira fica congelada nela, sem transmitir o tremulo.
+            tolerance = max(0.0, float(vm.get("TOLERANCE", 0.0)))
+            if tolerance > 0:
+                if self.vec_anchor is None:
+                    self.vec_anchor = target_center
+                else:
+                    anchor_dist = math.hypot(
+                        target_center[0] - self.vec_anchor[0],
+                        target_center[1] - self.vec_anchor[1],
+                    )
+                    if anchor_dist <= tolerance:
+                        target_center = self.vec_anchor
+                    else:
+                        self.vec_anchor = target_center
+
             if self.aim_center is not None:
                 ref_cx, ref_cy = float(self.aim_center[0]), float(self.aim_center[1])
             else:
@@ -455,16 +476,18 @@ class MotionController:
                     origin = ""
                     if self.aim_reference == "camera" and self.aim_center is not None:
                         origin = f"[orig {int(self.aim_center[0])},{int(self.aim_center[1])}] "
+                    tol_px = max(0.0, float(CONFIG["VECTOR_MOUSE"].get("TOLERANCE", 0.0)))
+                    tol_tag = f" tol={int(tol_px)}px" if (tol_px > 0 and self.aim_reference == "camera") else ""
                     if vec_info is not None:
                         vec_dx, vec_dy, vec_speed, vec_mag_norm, vec_border = vec_info
                         if not self.vec_has_target:
                             vector_label = f"Vector[{ref_tag}]: ponto vermelho nao detectado"
                         elif self.vec_in_dead_zone:
-                            vector_label = f"Vector[{ref_tag}] {origin}: CENTRO (mantenha o {self._aim_hint()})"
+                            vector_label = f"Vector[{ref_tag}] {origin}: CENTRO (mantenha o {self._aim_hint()}){tol_tag}"
                         elif vec_border is not None:
-                            vector_label = f"Vector[{ref_tag}] {origin}: BORDA {vec_border} (cursor preso)"
+                            vector_label = f"Vector[{ref_tag}] {origin}: BORDA {vec_border} (cursor preso){tol_tag}"
                         else:
-                            vector_label = f"Vector[{ref_tag}] {origin}: dx={vec_dx:+.0f} dy={vec_dy:+.0f} accel={int(vec_mag_norm * 100)}%"
+                            vector_label = f"Vector[{ref_tag}] {origin}: dx={vec_dx:+.0f} dy={vec_dy:+.0f} accel={int(vec_mag_norm * 100)}%{tol_tag}"
                     else:
                         vector_label = f"Vector[{ref_tag}]: no input driver"
 
@@ -483,6 +506,9 @@ class MotionController:
                         cv2.line(frame, (dz_center[0] - 8, dz_center[1]), (dz_center[0] + 8, dz_center[1]), dz_color, 1)
                         cv2.line(frame, (dz_center[0], dz_center[1] - 8), (dz_center[0], dz_center[1] + 8), dz_color, 1)
                         cv2.putText(frame, "Origem da mira", (dz_center[0] + 12, dz_center[1] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, dz_color, 2)
+                        if tol_px > 0 and self.aim_reference == "camera" and self.vec_anchor is not None:
+                            cv2.circle(frame, (int(self.vec_anchor[0]), int(self.vec_anchor[1])), int(tol_px), (255, 200, 0), 1)
+                            cv2.putText(frame, f"Tolerancia da mira: {int(tol_px)}px", (10, 235), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
                         border_color = (0, 0, 255) if vec_border is not None else (0, 255, 0)
                         cv2.rectangle(frame, capture_box_start, capture_box_end, border_color, 2)
                         if vec_info is not None and not self.vec_in_dead_zone and vec_speed > 0:
@@ -533,14 +559,17 @@ class MotionController:
                     self.vector_mouse_enabled = not self.vector_mouse_enabled
                     self.vec_vel = [0.0, 0.0]
                     self.vec_accum = [0.0, 0.0]
+                    self.vec_anchor = None
                 if key == ord(CONFIG["VECTOR_MOUSE"].get("AIM_KEY", "n")):
                     self.aim_reference = "screen" if self.aim_reference == "camera" else "camera"
                     self.vec_vel = [0.0, 0.0]
                     self.vec_accum = [0.0, 0.0]
+                    self.vec_anchor = None
                     print(f"[INFO] Mira vetorial: perspectiva {self.aim_reference.upper()}.")
                 if key == ord(CONFIG["VECTOR_MOUSE"].get("CALIBRATE_KEY", "c")):
                     self.vec_vel = [0.0, 0.0]
                     self.vec_accum = [0.0, 0.0]
+                    self.vec_anchor = None
                     if self.aim_reference == "camera" and target_center is not None:
                         self.aim_center = (int(target_center[0]), int(target_center[1]))
                         print(f"[INFO] Centro de mira calibrado em {self.aim_center}.")
@@ -553,6 +582,7 @@ class MotionController:
                     self.prev_center = None
                     self.vec_vel = [0.0, 0.0]
                     self.vec_accum = [0.0, 0.0]
+                    self.vec_anchor = None
                     print(f"[INFO] {'PAUSADO' if self.paused else 'RETOMADO'} - simulacao de input {'desativada' if self.paused else 'ativa'}.")
                 if key == 27:
                     break
