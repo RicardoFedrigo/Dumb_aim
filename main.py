@@ -91,6 +91,9 @@ CONFIG = {
         "SMOOTHING": 0.8,     # suavizacao exponencial da velocidade (0..1)
         "TOLERANCE": 10.0      # px: estabiliza o tremor da mira (0 = desativa)
     },
+    "TARGET_MOUSE": {
+        "TOLERANCE": 10.0      # px: congela o cursor no modo Alvo enquanto o alvo oscilar dentro do raio (0 = desativa)
+    },
     "INPUT_ENABLED": True,
     "PAUSE_KEY": "p"       # pausa/retoma a simulacao de teclado/mouse (P)
 }
@@ -171,6 +174,7 @@ class MotionController:
         self.vec_vel = [0.0, 0.0]
         self.vec_accum = [0.0, 0.0]
         self.vec_in_dead_zone = False
+        self.target_tol_anchor = None
 
     def _find_color_target(self, frame):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -213,6 +217,21 @@ class MotionController:
                 input_driver.move(screen_x, screen_y)
         except Exception:
             pass
+
+    def _target_tolerance_move(self, target_center, frame_width, frame_height):
+        tol = float(CONFIG["TARGET_MOUSE"].get("TOLERANCE", 0.0))
+        if tol > 0:
+            if self.target_tol_anchor is None:
+                self.target_tol_anchor = target_center
+            else:
+                dist = math.hypot(
+                    target_center[0] - self.target_tol_anchor[0],
+                    target_center[1] - self.target_tol_anchor[1],
+                )
+                if dist <= tol:
+                    return
+                self.target_tol_anchor = target_center
+        self._move_mouse_to_point(target_center, frame_width, frame_height)
 
     def _get_mouse_pos(self):
         try:
@@ -413,7 +432,13 @@ class MotionController:
                     cv2.line(frame, (target_center[0] - 25, target_center[1]), (target_center[0] + 25, target_center[1]), color_draw, 1)
                     cv2.line(frame, (target_center[0], target_center[1] - 25), (target_center[0], target_center[1] + 25), color_draw, 1)
                     if not self.vector_mouse_enabled and not self.paused:
-                        self._move_mouse_to_point(target_center, frame_width, frame_height)
+                        self._target_tolerance_move(target_center, frame_width, frame_height)
+
+                if not self.vector_mouse_enabled and self.target_tol_anchor is not None:
+                    tol = float(CONFIG["TARGET_MOUSE"].get("TOLERANCE", 0.0))
+                    if tol > 0:
+                        cv2.circle(frame, (int(self.target_tol_anchor[0]), int(self.target_tol_anchor[1])), int(tol), (255, 200, 0), 1)
+                        cv2.putText(frame, f"Tolerancia da mira: {int(tol)}px", (10, 235), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
 
                 if pose_res.pose_landmarks:
                     tracking_info = "Capturing: body"
@@ -560,6 +585,7 @@ class MotionController:
                     self.vec_vel = [0.0, 0.0]
                     self.vec_accum = [0.0, 0.0]
                     self.vec_anchor = None
+                    self.target_tol_anchor = None
                 if key == ord(CONFIG["VECTOR_MOUSE"].get("AIM_KEY", "n")):
                     self.aim_reference = "screen" if self.aim_reference == "camera" else "camera"
                     self.vec_vel = [0.0, 0.0]
@@ -583,6 +609,7 @@ class MotionController:
                     self.vec_vel = [0.0, 0.0]
                     self.vec_accum = [0.0, 0.0]
                     self.vec_anchor = None
+                    self.target_tol_anchor = None
                     print(f"[INFO] {'PAUSADO' if self.paused else 'RETOMADO'} - simulacao de input {'desativada' if self.paused else 'ativa'}.")
                 if key == 27:
                     break
